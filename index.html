@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab Director Simulator - Main View</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <!-- Main Viewport -->
+    <div class="main-viewport" id="lab-floor"><h1 class="floor-title">Lab Floor View</h1></div>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="stat-panel"><div class="stat-label">Current Day</div><div class="stat-value" id="day-display">1</div></div>
+        <div class="stat-panel"><div class="stat-label">Laboratory Budget</div><div class="stat-value" id="budget-display">$0</div><div class="net-indicator" id="net-display">+$0 / day</div></div>
+        <div class="action-buttons"><button class="side-btn" onclick="openShop()">Purchase Instrument</button><button class="side-btn" id="arrange-btn" onclick="toggleArrangeMode()">Arrange Instruments</button></div>
+    </div>
+
+    <!-- Bottom Menu -->
+    <div class="bottom-panel">
+        <div class="menu-group"><button class="menu-btn" onclick="openRoster()">Instruments</button><button class="menu-btn">Personnel</button><button class="menu-btn">Clinical Services</button><button class="menu-btn">Send-Outs</button><button class="menu-btn">IT</button></div>
+        <button class="advance-btn" onclick="advanceShift()">Advance Day</button>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay" id="shop-modal"><div class="modal-content"><div class="modal-header"><h2>Equipment Catalog</h2><button class="close-btn" onclick="closeShop()">&times;</button></div><div class="catalog-grid" id="catalog-container"></div></div></div>
+    <div class="modal-overlay" id="roster-modal"><div class="modal-content wide-modal"><div class="modal-header"><h2>Laboratory Instruments</h2><button class="close-btn" onclick="closeRoster()">&times;</button></div><table class="roster-table"><thead><tr><th>Instrument</th><th>Status</th><th>QC</th><th>PT</th><th>Verification</th></tr></thead><tbody id="roster-body"></tbody></table></div></div>
+    
+    <!-- Info & IFU -->
+    <div class="modal-overlay" id="info-modal" style="z-index: 250;"><div class="modal-content"><div class="modal-header"><h2>What is Verification?</h2><button class="close-btn" onclick="document.getElementById('info-modal').style.display='none'">&times;</button></div><div style="line-height: 1.6; color: var(--text-main);"><p><strong>Verification vs. Validation:</strong> Validation proves a new or modified assay works. Verification proves that an unmodified, FDA-cleared instrument performs according to manufacturer specifications in your lab.</p><p><strong>CLIA Requirements:</strong> Before bringing an instrument online, you must verify Accuracy, Precision, Reportable Range (AMR), and Reference Intervals.</p></div></div></div>
+    <div class="modal-overlay" id="ifu-modal" style="z-index: 350;"><div class="modal-content"><div class="modal-header"><h2>Instructions for Use (IFU)</h2><button class="close-btn" onclick="document.getElementById('ifu-modal').style.display='none'">&times;</button></div><div id="ifu-content" style="line-height: 1.6; color: var(--text-main);"></div></div></div>
+    <div class="modal-overlay" id="graph-modal" style="z-index: 360;"><div class="modal-content wide-modal" style="max-width: 980px; width: min(980px, 92vw); max-height: 82vh; overflow: hidden;">
+        <div class="modal-header"><h2 id="graph-modal-title">Accuracy Graph</h2><button class="close-btn" onclick="document.getElementById('graph-modal').style.display='none'">&times;</button></div>
+        <div id="graph-modal-content" style="color: var(--text-main); max-height: 72vh; overflow: hidden; display: flex; align-items: center; justify-content: center;"></div>
+    </div></div>
+
+    <!-- Verification Launch View -->
+    <div class="verification-view" id="verification-view">
+        <div class="verif-header"><h2>Instrument Verification Process</h2><div><button class="info-btn" onclick="document.getElementById('info-modal').style.display='flex'">What is Verification?</button><button class="return-btn" onclick="closeVerificationScreen()">Return to Lab</button></div></div>
+        <div class="verif-content">
+            <div class="verif-left">
+                <div class="large-sprite" id="verif-sprite"></div>
+                <div class="verif-inst-name" id="verif-name">Instrument Name</div>
+                <button class="side-btn" style="margin-top: 15px; width: 60%;" onclick="openIFU()">View IFU</button>
+                <p style="color: var(--text-muted); text-align: center; margin-top: 15px; font-size: 0.9rem;">Instruments must pass all required validation studies before they can be brought online.</p>
+            </div>
+            <div class="verif-right" id="study-buttons-container"></div>
+        </div>
+    </div>
+
+    <!-- Study Runner View -->
+    <div class="study-runner-view" id="study-runner-view">
+        <div class="study-runner-header"><h2 id="runner-title">Study Title</h2><p class="study-desc" id="runner-desc">Study Description</p></div>
+        <div class="study-runner-content">
+            <div class="animation-panel">
+                <div class="machine-graphic" id="runner-machine"><div id="runner-machine-icon" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"></div><div class="processing-light" id="runner-light"></div></div>
+                <button class="side-btn" style="margin-bottom: 20px; width: 60%;" onclick="openIFU()">View IFU</button>
+                <div class="progress-text" id="runner-progress">Initializing...</div>
+            </div>
+            <div class="results-panel">
+                <div class="results-table-wrapper">
+                    <table class="results-table">
+                        <thead><tr><th>Sample #</th><th>WBC (10³/µL)</th><th>RBC (10⁶/µL)</th><th>HGB (g/dL)</th><th>PLT (10³/µL)</th></tr></thead>
+                        <tbody id="runner-table-body"></tbody>
+                    </table>
+                    <div id="runner-graph-container"></div>
+                </div>
+                <div class="study-footer">
+                    <div class="stats-readout" id="runner-stats">Awaiting Data...</div>
+                    <div class="decision-btns" id="runner-decisions"><button class="btn-reject" onclick="finalizeStudy(false)">Reject</button><button class="btn-accept" onclick="finalizeStudy(true)">Accept Results</button></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

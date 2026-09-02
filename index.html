@@ -15,22 +15,26 @@
     <div class="sidebar">
         <div class="stat-panel"><div class="stat-label">Current Day</div><div class="stat-value" id="day-display">1</div></div>
         <div class="stat-panel"><div class="stat-label">Laboratory Budget</div><div class="stat-value" id="budget-display">$0</div><div class="net-indicator" id="net-display">+$0 / day</div></div>
-        <div class="action-buttons"><button class="side-btn" onclick="openShop()">Purchase Instrument</button><button class="side-btn" id="arrange-btn" onclick="toggleArrangeMode()">Arrange Instruments</button></div>
+        <div class="action-buttons"><button class="side-btn" onclick="openShop()">Purchase Instrument</button><button class="side-btn" id="arrange-btn" onclick="toggleArrangeMode()">Arrange Instruments</button><button class="side-btn" onclick="openQuizMode()">Quiz Mode</button></div>
     </div>
 
     <!-- Bottom Menu -->
     <div class="bottom-panel">
-        <div class="menu-group"><button class="menu-btn" onclick="openRoster()">Instruments</button><button class="menu-btn">Personnel</button><button class="menu-btn">Clinical Services</button><button class="menu-btn">Send-Outs</button><button class="menu-btn">IT</button></div>
+        <div class="menu-group"><button class="menu-btn" onclick="openRoster()">Instruments</button><button class="menu-btn">Personnel</button><button class="menu-btn">Clinical Services</button><button class="menu-btn">Send-Outs</button><button class="menu-btn" onclick="openDevTools()">IT</button></div>
         <button class="advance-btn" onclick="advanceShift()">Advance Day</button>
     </div>
 
     <!-- Modals -->
     <div class="modal-overlay" id="shop-modal"><div class="modal-content"><div class="modal-header"><h2>Equipment Catalog</h2><button class="close-btn" onclick="closeShop()">&times;</button></div><div class="catalog-grid" id="catalog-container"></div></div></div>
     <div class="modal-overlay" id="roster-modal"><div class="modal-content wide-modal"><div class="modal-header"><h2>Laboratory Instruments</h2><button class="close-btn" onclick="closeRoster()">&times;</button></div><table class="roster-table"><thead><tr><th>Instrument</th><th>Status</th><th>QC</th><th>PT</th><th>Verification</th></tr></thead><tbody id="roster-body"></tbody></table></div></div>
+    <div class="modal-overlay" id="devtools-modal"><div class="modal-content wide-modal"><div class="modal-header"><h2>Developer Tools</h2><button class="close-btn" onclick="closeDevTools()">&times;</button></div><div class="devtools-panel"><p class="devtools-note">Quick approval shortcuts for instrument compliance testing.</p><div id="devtools-container"></div></div></div></div>
+    <div class="modal-overlay" id="quiz-modal"><div class="modal-content quiz-modal-content"><div class="modal-header"><h2>Quiz Mode</h2><button class="close-btn" onclick="closeQuizMode()">&times;</button></div><div id="quiz-modal-content"></div></div></div>
+    <div class="modal-overlay" id="qc-modal"><div class="modal-content wide-modal" style="max-width: 92vw; width: 92vw; max-height: 92vh; padding: 24px;"><div class="modal-header"><h2 id="qc-modal-title">QC Monitoring</h2><button class="close-btn" onclick="document.getElementById('qc-modal').style.display='none'">&times;</button></div><div id="qc-modal-content" style="color: var(--text-main); max-height: 78vh; overflow-y: auto; padding-right: 6px;"></div></div></div>
     
     <!-- Info & IFU -->
     <div class="modal-overlay" id="info-modal" style="z-index: 250;"><div class="modal-content"><div class="modal-header"><h2>What is Verification?</h2><button class="close-btn" onclick="document.getElementById('info-modal').style.display='none'">&times;</button></div><div style="line-height: 1.6; color: var(--text-main);"><p><strong>Verification vs. Validation:</strong> Validation proves a new or modified assay works. Verification proves that an unmodified, FDA-cleared instrument performs according to manufacturer specifications in your lab.</p><p><strong>CLIA Requirements:</strong> Before bringing an instrument online, you must verify Accuracy, Precision, Reportable Range (AMR), and Reference Intervals.</p></div></div></div>
     <div class="modal-overlay" id="ifu-modal" style="z-index: 350;"><div class="modal-content"><div class="modal-header"><h2>Instructions for Use (IFU)</h2><button class="close-btn" onclick="document.getElementById('ifu-modal').style.display='none'">&times;</button></div><div id="ifu-content" style="line-height: 1.6; color: var(--text-main);"></div></div></div>
+    <div class="modal-overlay" id="pt-modal" style="z-index: 365;"><div class="modal-content wide-modal pt-report-modal"><div class="modal-header"><h2>Proficiency Testing Report</h2><button class="close-btn" onclick="document.getElementById('pt-modal').style.display='none'">&times;</button></div><div id="pt-modal-content"></div></div></div>
     <div class="modal-overlay" id="graph-modal" style="z-index: 360;"><div class="modal-content wide-modal" style="max-width: 980px; width: min(980px, 92vw); max-height: 82vh; overflow: hidden;">
         <div class="modal-header"><h2 id="graph-modal-title">Accuracy Graph</h2><button class="close-btn" onclick="document.getElementById('graph-modal').style.display='none'">&times;</button></div>
         <div id="graph-modal-content" style="color: var(--text-main); max-height: 72vh; overflow: hidden; display: flex; align-items: center; justify-content: center;"></div>

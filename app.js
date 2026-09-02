@@ -40,13 +40,15 @@
         const dayDisplay = document.getElementById('day-display'); const budgetDisplay = document.getElementById('budget-display'); const netDisplay = document.getElementById('net-display');
         const shopModal = document.getElementById('shop-modal'); const catalogContainer = document.getElementById('catalog-container');
         const rosterModal = document.getElementById('roster-modal'); const rosterBody = document.getElementById('roster-body');
+        const devToolsModal = document.getElementById('devtools-modal'); const devToolsContainer = document.getElementById('devtools-container');
+        const qcModal = document.getElementById('qc-modal'); const qcModalContent = document.getElementById('qc-modal-content'); const qcModalTitle = document.getElementById('qc-modal-title');
         const labFloor = document.getElementById('lab-floor'); const arrangeBtn = document.getElementById('arrange-btn');
         const verificationView = document.getElementById('verification-view'); const verifSprite = document.getElementById('verif-sprite'); const verifName = document.getElementById('verif-name'); const studyButtonsContainer = document.getElementById('study-buttons-container');
         const studyRunnerView = document.getElementById('study-runner-view'); const runnerTableBody = document.getElementById('runner-table-body'); const runnerProgress = document.getElementById('runner-progress'); const runnerLight = document.getElementById('runner-light'); const runnerDecisions = document.getElementById('runner-decisions'); const runnerStats = document.getElementById('runner-stats'); const runnerGraphContainer = document.getElementById('runner-graph-container');
 
         /** --- CORE LOOP & UI --- */
         function initGame() { updateUI(); }
-        function advanceShift() { currentDay++; let dailyRevenue = gameConfig.baseDailyVolume * gameConfig.revenuePerTest; currentBudget += dailyRevenue; currentBudget -= gameConfig.dailyOperatingCost; updateUI(); }
+        function advanceShift() { currentDay++; let dailyRevenue = gameConfig.baseDailyVolume * gameConfig.revenuePerTest; currentBudget += dailyRevenue; currentBudget -= gameConfig.dailyOperatingCost; updateQCDataOnDayAdvance(); updateUI(); }
         function updateUI() {
             dayDisplay.textContent = currentDay; budgetDisplay.textContent = "$" + currentBudget.toLocaleString();
             let dailyNet = (gameConfig.baseDailyVolume * gameConfig.revenuePerTest) - gameConfig.dailyOperatingCost;
@@ -94,7 +96,7 @@
             else {
                 const uniqueId = 'inst_' + instrumentIdCounter++; const perm = document.createElement('div'); perm.id = uniqueId; perm.className = 'instrument-sprite'; perm.style.backgroundColor = activeInstrument.color; perm.style.width = activeInstrument.w + 'px'; perm.style.height = activeInstrument.h + 'px'; perm.style.left = x + 'px'; perm.style.top = y + 'px'; perm.innerHTML = activeInstrument.icon ? activeInstrument.icon : activeInstrument.abv; perm.title = activeInstrument.name;
                 perm.onclick = (event) => handleInstrumentClick(event, uniqueId); labFloor.appendChild(perm);
-                ownedInstruments.push({ id: uniqueId, catalogId: activeInstrument.id, name: activeInstrument.name, status: 'Offline', qc: 'Offline', pt: 'Offline', verification: 'Not Verified', studies: { Background: 'Not Started', Carryover: 'Not Started', Precision: 'Not Started', Accuracy: 'Not Started', AMR: 'Not Started', Reference: 'Not Started' } });
+                ownedInstruments.push({ id: uniqueId, catalogId: activeInstrument.id, name: activeInstrument.name, status: 'Offline', qc: 'Not Verified', pt: 'Not Verified', verification: 'Not Verified', verificationDate: null, ptDueDay: null, ptHistory: [], ptCurrent: null, studies: { Background: 'Not Started', Carryover: 'Not Started', Precision: 'Not Started', Accuracy: 'Not Started', AMR: 'Not Started', Reference: 'Not Started' } });
             }
             document.removeEventListener('mousemove', moveGhost); if (ghostElement) { ghostElement.remove(); ghostElement = null; } activeInstrument = null; movingInstrumentId = null; labFloor.style.cursor = 'default'; if (isArrangeMode) toggleArrangeMode();
         }
@@ -112,14 +114,1016 @@
 
         /** --- ROSTER & VERIFICATION SCREEN --- */
         function openRoster() { if (activeInstrument) return; populateRoster(); rosterModal.style.display = 'flex'; } function closeRoster() { rosterModal.style.display = 'none'; }
+        function openDevTools() { if (activeInstrument) return; populateDevTools(); devToolsModal.style.display = 'flex'; }
+        function closeDevTools() { devToolsModal.style.display = 'none'; }
+
+        function generateWestgardPattern({ mean, sd, rule, parameter }) {
+            switch (rule) {
+                case '2s':
+                    return [
+                        mean - (1.2 * sd),
+                        mean - (0.8 * sd),
+                        mean - (0.3 * sd),
+                        mean + (0.7 * sd),
+                        mean + (2.3 * sd),
+                        mean + (0.5 * sd),
+                        mean - (0.2 * sd)
+                    ];
+                case 'R4s':
+                    return [
+                        mean + (0.2 * sd),
+                        mean - (0.5 * sd),
+                        mean + (0.4 * sd),
+                        mean - (0.7 * sd),
+                        mean + (2.6 * sd),
+                        mean - (2.2 * sd),
+                        mean + (0.1 * sd)
+                    ];
+                case 'Drift':
+                    return [
+                        mean + (0.2 * sd),
+                        mean + (0.7 * sd),
+                        mean + (1.1 * sd),
+                        mean + (1.8 * sd),
+                        mean + (2.5 * sd),
+                        mean + (3.1 * sd),
+                        mean + (3.8 * sd)
+                    ];
+                case '10x':
+                    return Array.from({ length: 11 }, (_, i) => mean + ((0.9 + (i * 0.15)) * sd));
+                case '22s':
+                    return [
+                        mean + (0.2 * sd),
+                        mean + (0.6 * sd),
+                        mean + (1.0 * sd),
+                        mean + (1.4 * sd),
+                        mean + (2.5 * sd),
+                        mean + (2.9 * sd),
+                        mean + (0.8 * sd)
+                    ];
+                default:
+                    return [mean, mean, mean, mean, mean, mean, mean];
+            }
+        }
+
+        function buildWestgardQuestion({ parameter, mean, sd, rule, prompt, followUpAnswer, followUpOptions, ruleOptions }) {
+            return {
+                parameter,
+                mean,
+                sd,
+                ruleAnswer: rule,
+                ruleOptions,
+                prompt,
+                followUpQuestion: 'What is the correct follow-up action?',
+                followUpAnswer,
+                followUpOptions,
+                points: generateWestgardPattern({ mean, sd, rule, parameter })
+            };
+        }
+
+        const westgardQuizBank = [
+            buildWestgardQuestion({
+                parameter: 'RBC', mean: 5.1, sd: 0.18, rule: '2s',
+                prompt: 'The following hematology QC run shows a single RBC value beyond the +2 SD limit. Which Westgard rule was broken?',
+                followUpAnswer: 'Repeat the RBC control and verify sample aspiration, lyse reagent integrity, and analyzer carryover before releasing patient results.',
+                followUpOptions: [
+                    'Repeat the RBC control and verify sample aspiration, lyse reagent integrity, and analyzer carryover before releasing patient results.',
+                    'Reject the run and immediately replace the instrument with a backup analyzer.',
+                    'Ignore the warning if the next control is acceptable on the same shift.',
+                    'Send the patient reports and troubleshoot after the end of the day.'
+                ],
+                ruleOptions: ['2s', 'R4s', '22s', '10x']
+            }),
+            buildWestgardQuestion({
+                parameter: 'Hemoglobin', mean: 14.2, sd: 0.42, rule: 'R4s',
+                prompt: 'Two consecutive control results are separated by more than 4 SD, which indicates a random error pattern. Which Westgard rule was broken?',
+                followUpAnswer: 'Reject the run, repeat the control, and inspect the hemoglobin reagent, mixing and tubing for carryover or pipetting error before continuing.',
+                followUpOptions: [
+                    'Ignore the result because one control is acceptable.',
+                    'Reject the run, repeat the control, and inspect the hemoglobin reagent, mixing and tubing for carryover or pipetting error before continuing.',
+                    'Continue the run and document it in the monthly QC summary.',
+                    'Only perform maintenance if the same error occurs again the next day.'
+                ],
+                ruleOptions: ['2s', 'R4s', 'Drift', '10x']
+            }),
+            buildWestgardQuestion({
+                parameter: 'WBC', mean: 7.8, sd: 0.32, rule: 'Drift',
+                prompt: 'The plot shows a sustained trend in the same direction across six consecutive control measurements. Which Westgard rule was broken?',
+                followUpAnswer: 'Check WBC reagent concentration and storage, remix or replace the reagent, and verify analyzer maintenance before releasing results.',
+                followUpOptions: [
+                    'Document it and keep running without action.',
+                    'Repeat the control once and ignore it.',
+                    'Check WBC reagent concentration and storage, remix or replace the reagent, and verify analyzer maintenance before releasing results.',
+                    'Continue using the reagent until the next monthly QC review.'
+                ],
+                ruleOptions: ['2s', 'Drift', 'R4s', '10x']
+            }),
+            buildWestgardQuestion({
+                parameter: 'RBC', mean: 5.1, sd: 0.18, rule: '10x',
+                prompt: 'Ten consecutive control values remain on the same side of the mean. Which Westgard rule was broken?',
+                followUpAnswer: 'Investigate systematic bias in the RBC channel, verify calibration and reagent lot, and perform analyzer maintenance before resuming patient testing.',
+                followUpOptions: [
+                    'Ignore it because the values stayed within 2 SD.',
+                    'Repeat the run only once and continue.',
+                    'Investigate systematic bias in the RBC channel, verify calibration and reagent lot, and perform analyzer maintenance before resuming patient testing.',
+                    'Call the manufacturer and ignore the problem until next month.'
+                ],
+                ruleOptions: ['2s', 'R4s', '10x', 'Drift']
+            }),
+            buildWestgardQuestion({
+                parameter: 'Hemoglobin', mean: 14.2, sd: 0.42, rule: '22s',
+                prompt: 'Two consecutive control values both exceed +2 SD on the same side of the mean. Which Westgard rule was broken?',
+                followUpAnswer: 'Reject the run and investigate systematic error in the hemoglobin channel, including reagent integrity, calibration, and analyzer maintenance.',
+                followUpOptions: [
+                    'Ignore the finding if the other control remains normal.',
+                    'Document it and continue until end of shift.',
+                    'Reject the run and investigate systematic error in the hemoglobin channel, including reagent integrity, calibration, and analyzer maintenance.',
+                    'Only check the lot number after the next QC event.'
+                ],
+                ruleOptions: ['22s', '2s', 'Drift', 'R4s']
+            })
+        ];
+
+        const quizState = {
+            module: 'menu',
+            questionIndex: 0,
+            completedModules: []
+        };
+
+        function upsertQuizResult(moduleName, score, possible) {
+            const existing = quizState.completedModules.find(item => item.module === moduleName);
+            if (existing) {
+                existing.score = score;
+                existing.possible = possible;
+                return;
+            }
+            quizState.completedModules.push({ module: moduleName, score, possible });
+        }
+
+        function getQuizSummaryMarkup() {
+            const totalScore = quizState.completedModules.reduce((sum, item) => sum + item.score, 0);
+            const totalPossible = quizState.completedModules.reduce((sum, item) => sum + item.possible, 0);
+            const modulesTaken = quizState.completedModules.length ? quizState.completedModules.map(item => `${item.module} (${item.score}/${item.possible})`).join(', ') : 'No quizzes completed yet';
+            return `
+                <div class="quiz-summary-panel">
+                    <div class="quiz-summary-header">Quiz Summary</div>
+                    <div class="quiz-summary-score">${totalScore} / ${totalPossible || 0}</div>
+                    <div class="quiz-summary-header">Quizzes Taken</div>
+                    <ul class="quiz-summary-list"><li>${modulesTaken}</li></ul>
+                </div>
+            `;
+        }
+
+        function buildWestgardChartSvg(question) {
+            const values = question.points;
+            const mean = question.mean;
+            const sd = question.sd;
+            const width = 640;
+            const height = 290;
+            const margin = { top: 18, right: 28, bottom: 34, left: 58 };
+            const graphWidth = width - margin.left - margin.right;
+            const graphHeight = height - margin.top - margin.bottom;
+            const minValue = mean - (3 * sd);
+            const maxValue = mean + (3 * sd);
+            const yFor = (val) => margin.top + graphHeight - (((val - minValue) / (maxValue - minValue || 1)) * graphHeight);
+            const xFor = (index) => margin.left + (index / Math.max(values.length - 1, 1)) * graphWidth;
+
+            const controlLines = [-3, -2, -1, 0, 1, 2, 3].map(offset => {
+                const value = mean + (offset * sd);
+                const y = yFor(value);
+                const isMean = offset === 0;
+                return `
+                    <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="${isMean ? '#f8fafc' : 'rgba(148, 163, 184, 0.5)'}" stroke-dasharray="5 5" stroke-width="${isMean ? 1.4 : 1}" />
+                    <text x="${width - margin.right - 8}" y="${y - 6}" fill="${isMean ? '#f8fafc' : '#94a3b8'}" font-size="10" text-anchor="end">${offset >= 0 ? '+' : ''}${offset} SD ${value.toFixed(2)}</text>
+                `;
+            }).join('');
+
+            const points = values.map((value, index) => {
+                const x = xFor(index);
+                const y = yFor(value);
+                return `
+                    <circle cx="${x}" cy="${y}" r="5" fill="#4ade80" stroke="#f8fafc" stroke-width="1.2" />
+                    <text x="${x}" y="${height - 8}" fill="#94a3b8" font-size="9" text-anchor="middle">${index + 1}</text>
+                `;
+            }).join('');
+
+            return `
+                <svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="0" y="0" width="${width}" height="${height}" fill="rgba(15,23,42,0.9)" rx="8"/>
+                    <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" stroke="#e2e8f0" />
+                    <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" stroke="#e2e8f0" />
+                    ${controlLines}
+                    ${points}
+                    <text x="${width / 2}" y="${height - 4}" fill="#94a3b8" font-size="11" text-anchor="middle">Control run</text>
+                    <text x="16" y="${height / 2}" fill="#94a3b8" font-size="11" transform="rotate(-90 16 ${height / 2})" text-anchor="middle">Result</text>
+                </svg>
+            `;
+        }
+
+        function renderQuizMenu() {
+            const container = document.getElementById('quiz-modal-content');
+            container.innerHTML = `
+                ${getQuizSummaryMarkup()}
+                <div class="quiz-mode-list">
+                    <button class="quiz-mode-btn" onclick="launchQuizOption('qc')">QC</button>
+                    <button class="quiz-mode-btn" onclick="launchQuizOption('verification')">Verification</button>
+                    <button class="quiz-mode-btn" onclick="launchQuizOption('clia')">CLIA</button>
+                </div>
+            `;
+        }
+
+        function renderQuizModule(moduleName) {
+            const container = document.getElementById('quiz-modal-content');
+            if (moduleName === 'qc') {
+                const question = westgardQuizBank[quizState.questionIndex];
+                const isRuleAnswered = question.ruleAnswered;
+                const isFollowUpAnswered = question.followUpAnswered;
+                const ruleButtons = question.ruleOptions.map(option => {
+                    const selected = question.ruleSelected === option;
+                    let classes = 'quiz-option';
+                    if (isRuleAnswered) {
+                        if (option === question.ruleAnswer) classes += ' correct';
+                        else if (selected) classes += ' wrong';
+                    }
+                    return `<button class="${classes}" onclick="selectQcRule('${option}')">${option}</button>`;
+                }).join('');
+
+                const followUpButtons = question.followUpOptions.map(option => {
+                    const selected = question.followUpSelected === option;
+                    let classes = 'quiz-option';
+                    if (isFollowUpAnswered) {
+                        if (option === question.followUpAnswer) classes += ' correct';
+                        else if (selected) classes += ' wrong';
+                    }
+                    return `<button class="${classes}" onclick="selectQcFollowUp('${option}')">${option}</button>`;
+                }).join('');
+
+                const followUpMarkup = question.ruleAnswered ? `
+                    <div class="quiz-question" style="margin-top: 8px;">${question.followUpQuestion}</div>
+                    <div class="quiz-answer-grid" style="margin-top: 10px;">${followUpButtons}</div>
+                ` : '';
+
+                let feedbackMarkup = '';
+                if (question.ruleAnswered && !question.ruleCorrect) {
+                    feedbackMarkup = `<div class="quiz-feedback error">Incorrect. The correct rule was <strong>${question.ruleAnswer}</strong>. Review the control pattern and continue to the follow-up question.</div>`;
+                } else if (question.ruleAnswered && question.ruleCorrect) {
+                    feedbackMarkup = `<div class="quiz-feedback success">Correct. The pattern matches ${question.ruleAnswer}. Continue to the follow-up question.</div>`;
+                }
+
+                if (question.followUpAnswered && question.followUpCorrect) {
+                    feedbackMarkup += `<div class="quiz-feedback success" style="margin-top: 12px;">Correct follow-up action: ${question.followUpAnswer}</div>`;
+                } else if (question.followUpAnswered && !question.followUpCorrect) {
+                    feedbackMarkup += `<div class="quiz-feedback error" style="margin-top: 12px;">The correct follow-up action is: ${question.followUpAnswer}</div>`;
+                }
+
+                let nextButton = '';
+                if (question.followUpAnswered) {
+                    nextButton = `<button class="quiz-next-btn" onclick="advanceQcQuestion()">Next Question</button>`;
+                }
+
+                container.innerHTML = `
+                    <div class="quiz-header-row">
+                        <div class="quiz-progress">QC Quiz • Question ${quizState.questionIndex + 1} of ${westgardQuizBank.length}</div>
+                        <button class="quiz-back-btn" onclick="renderQuizMenu()">Back</button>
+                    </div>
+                    <div class="quiz-card">
+                        <div class="quiz-question"><strong>${question.parameter}</strong> • ${question.prompt}</div>
+                        <div class="quiz-chart-wrap">${buildWestgardChartSvg(question)}</div>
+                        <div class="quiz-question">Which rule was broken?</div>
+                        <div class="quiz-answer-grid">${ruleButtons}</div>
+                        ${feedbackMarkup}
+                        ${followUpMarkup}
+                        ${nextButton}
+                    </div>
+                `;
+                return;
+            }
+
+            if (moduleName === 'verification') {
+                const question = {
+                    prompt: 'Which statement is correct before an instrument is released for routine clinical testing?',
+                    answers: [
+                        'Verification must confirm accuracy, precision, reportable range, and reference intervals per CLIA expectations.',
+                        'Only the instrument serial number needs to be checked before putting it online.',
+                        'The instrument can be used after a single control run.',
+                        'Only QC review is required before routine use.'
+                    ],
+                    correct: 'Verification must confirm accuracy, precision, reportable range, and reference intervals per CLIA expectations.'
+                };
+                container.innerHTML = `
+                    <div class="quiz-header-row">
+                        <div class="quiz-progress">Verification Quiz</div>
+                        <button class="quiz-back-btn" onclick="renderQuizMenu()">Back</button>
+                    </div>
+                    <div class="quiz-card">
+                        <div class="quiz-question">${question.prompt}</div>
+                        <div class="quiz-answer-grid" style="margin-top: 12px;">
+                            ${question.answers.map(answer => `<button class="quiz-option" onclick="showVerificationResult('${answer}')">${answer}</button>`).join('')}
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            if (moduleName === 'clia') {
+                const question = {
+                    prompt: 'Which CLIA concept is most important before bringing a hematology analyzer into clinical service?',
+                    answers: [
+                        'Confirming the instrument meets verification standards for accuracy, precision, analytical range, and reference intervals.',
+                        'Only documenting annual maintenance.',
+                        'Waiting for a single pass on the next QC event.',
+                        'Installing the instrument and starting patient testing immediately.'
+                    ],
+                    correct: 'Confirming the instrument meets verification standards for accuracy, precision, analytical range, and reference intervals.'
+                };
+                container.innerHTML = `
+                    <div class="quiz-header-row">
+                        <div class="quiz-progress">CLIA Quiz</div>
+                        <button class="quiz-back-btn" onclick="renderQuizMenu()">Back</button>
+                    </div>
+                    <div class="quiz-card">
+                        <div class="quiz-question">${question.prompt}</div>
+                        <div class="quiz-answer-grid" style="margin-top: 12px;">
+                            ${question.answers.map(answer => `<button class="quiz-option" onclick="showCliaResult('${answer}')">${answer}</button>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function selectQcRule(option) {
+            const question = westgardQuizBank[quizState.questionIndex];
+            if (question.ruleAnswered) return;
+            question.ruleSelected = option;
+            question.ruleAnswered = true;
+            question.ruleCorrect = option === question.ruleAnswer;
+            renderQuizModule('qc');
+        }
+
+        function selectQcFollowUp(option) {
+            const question = westgardQuizBank[quizState.questionIndex];
+            if (question.followUpAnswered) return;
+            question.followUpSelected = option;
+            question.followUpAnswered = true;
+            question.followUpCorrect = option === question.followUpAnswer;
+            renderQuizModule('qc');
+        }
+
+        function finalizeQcQuiz() {
+            const score = westgardQuizBank.reduce((total, question) => total + ((question.ruleCorrect ? 1 : 0) + (question.followUpCorrect ? 1 : 0)), 0);
+            const possible = westgardQuizBank.length * 2;
+            upsertQuizResult('QC', score, possible);
+            const container = document.getElementById('quiz-modal-content');
+            container.innerHTML = `
+                <div class="quiz-header-row">
+                    <div class="quiz-progress">QC Quiz Complete</div>
+                    <button class="quiz-back-btn" onclick="renderQuizMenu()">Back</button>
+                </div>
+                <div class="quiz-card">
+                    <div class="quiz-summary-panel" style="margin-bottom:0;">
+                        <div class="quiz-summary-header">Final Score</div>
+                        <div class="quiz-summary-score">${score} / ${possible}</div>
+                        <div class="quiz-summary-header">Quizzes Taken</div>
+                        <ul class="quiz-summary-list"><li>${quizState.completedModules.map(item => `${item.module} (${item.score}/${item.possible})`).join('</li><li>')}</li></ul>
+                    </div>
+                    <button class="quiz-next-btn" onclick="renderQuizMenu()">Return to Quiz Menu</button>
+                </div>
+            `;
+        }
+
+        function advanceQcQuestion() {
+            const isLastQuestion = quizState.questionIndex === westgardQuizBank.length - 1;
+            if (isLastQuestion) {
+                finalizeQcQuiz();
+                return;
+            }
+            const nextIndex = quizState.questionIndex + 1;
+            quizState.questionIndex = nextIndex;
+            westgardQuizBank[quizState.questionIndex].ruleAnswered = false;
+            westgardQuizBank[quizState.questionIndex].ruleSelected = null;
+            westgardQuizBank[quizState.questionIndex].ruleCorrect = false;
+            westgardQuizBank[quizState.questionIndex].followUpAnswered = false;
+            westgardQuizBank[quizState.questionIndex].followUpSelected = null;
+            westgardQuizBank[quizState.questionIndex].followUpCorrect = false;
+            renderQuizModule('qc');
+        }
+
+        function showVerificationResult(answer) {
+            const correct = 'Verification must confirm accuracy, precision, reportable range, and reference intervals per CLIA expectations.';
+            const isCorrect = answer === correct;
+            upsertQuizResult('Verification', isCorrect ? 1 : 0, 1);
+            const container = document.getElementById('quiz-modal-content');
+            const statusClass = isCorrect ? 'success' : 'error';
+            const message = isCorrect ? 'Correct. Before an instrument is released for routine testing, it must be verified against the required performance characteristics.' : `Incorrect. The correct answer is: ${correct}`;
+            container.innerHTML = `
+                <div class="quiz-header-row">
+                    <div class="quiz-progress">Verification Quiz</div>
+                    <button class="quiz-back-btn" onclick="renderQuizMenu()">Back</button>
+                </div>
+                <div class="quiz-card">
+                    <div class="quiz-feedback ${statusClass}">${message}</div>
+                    <button class="quiz-next-btn" onclick="renderQuizMenu()">Return to Menu</button>
+                </div>
+            `;
+        }
+
+        function showCliaResult(answer) {
+            const correct = 'Confirming the instrument meets verification standards for accuracy, precision, analytical range, and reference intervals.';
+            const isCorrect = answer === correct;
+            upsertQuizResult('CLIA', isCorrect ? 1 : 0, 1);
+            const container = document.getElementById('quiz-modal-content');
+            const statusClass = isCorrect ? 'success' : 'error';
+            const message = isCorrect ? 'Correct. CLIA requires verification of analytical performance before clinical use.' : `Incorrect. The correct answer is: ${correct}`;
+            container.innerHTML = `
+                <div class="quiz-header-row">
+                    <div class="quiz-progress">CLIA Quiz</div>
+                    <button class="quiz-back-btn" onclick="renderQuizMenu()">Back</button>
+                </div>
+                <div class="quiz-card">
+                    <div class="quiz-feedback ${statusClass}">${message}</div>
+                    <button class="quiz-next-btn" onclick="renderQuizMenu()">Return to Menu</button>
+                </div>
+            `;
+        }
+
+        function openQuizMode() { const quizModal = document.getElementById('quiz-modal'); quizModal.style.display = 'flex'; renderQuizMenu(); }
+        function closeQuizMode() { document.getElementById('quiz-modal').style.display = 'none'; }
+        function launchQuizOption(option) {
+            quizState.module = option;
+            renderQuizModule(option);
+        }
+
+        function ensurePtArchive(instData) {
+            if (!instData.ptHistory) instData.ptHistory = [];
+            if (!instData.ptCurrent) instData.ptCurrent = null;
+            if (!instData.ptDueDay && instData.verificationDate) {
+                instData.ptDueDay = instData.verificationDate + 120;
+            }
+        }
+
+        function createPtReport(instData) {
+            const analytes = getInstrumentAnalytes(instData);
+            return {
+                id: `pt-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+                day: currentDay,
+                dateLabel: new Date(2026, 0, currentDay).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                status: 'Pass',
+                rows: analytes.map(analyte => {
+                    const refMean = analyte.target;
+                    const ourResult = analyte.target + ((Math.random() - 0.5) * analyte.sd * 1.1);
+                    const pass = Math.abs(ourResult - refMean) <= analyte.sd * 1.5;
+                    return {
+                        analyte: analyte.label,
+                        referenceMean: Number(refMean.toFixed(analyte.key === 'Platelets' || analyte.key === 'Hemoglobin' ? 1 : 2)),
+                        ourResult: Number(ourResult.toFixed(analyte.key === 'Platelets' || analyte.key === 'Hemoglobin' ? 1 : 2)),
+                        result: pass ? 'Pass' : 'Fail'
+                    };
+                })
+            };
+        }
+
+        function buildPtArchiveNav(instData, activeReportId) {
+            ensurePtArchive(instData);
+            if (!instData.ptHistory || !instData.ptHistory.length) return '';
+            const entries = [...instData.ptHistory].sort((a, b) => a.day - b.day);
+            return `
+                <div class="qc-month-tabs">
+                    ${entries.map(report => `
+                        <button class="qc-month-btn ${report.id === activeReportId ? 'active' : ''}" onclick="openArchivedPt('${instData.id}', '${report.id}')">
+                            <span class="qc-month-name">${report.dateLabel}</span>
+                            <span class="qc-month-status ${report.status === 'Fail' ? 'out' : 'in'}">${report.status}</span>
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function renderPtReportBody(instData, report, allowDecision = true) {
+            const statusBadge = report.status === 'Pass' ? '<span class="pt-status-badge pt-status-pass">Pass</span>' : '<span class="pt-status-badge pt-status-fail">Fail</span>';
+            const rows = report.rows.map(row => `
+                <tr>
+                    <td>${row.analyte}</td>
+                    <td>${row.referenceMean}</td>
+                    <td>${row.ourResult}</td>
+                    <td>${row.result}</td>
+                </tr>
+            `).join('');
+            const decisionButtons = allowDecision ? `
+                <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:18px;">
+                    <button class="btn-reject" onclick="markPtResult('${instData.id}', 'Fail')">Mark Fail</button>
+                    <button class="btn-accept" onclick="markPtResult('${instData.id}', 'Pass')">Mark Pass</button>
+                </div>
+            ` : '';
+
+            return `
+                <div class="pt-report-header">
+                    <h3>${instData.name}</h3>
+                    ${statusBadge}
+                </div>
+                <div class="pt-summary-grid">
+                    <div class="pt-summary-card">
+                        <div class="label">Instrument</div>
+                        <div class="value">${instData.name}</div>
+                    </div>
+                    <div class="pt-summary-card">
+                        <div class="label">Reference Lab Mean</div>
+                        <div class="value">${report.rows[0].referenceMean}</div>
+                    </div>
+                    <div class="pt-summary-card">
+                        <div class="label">PT Date</div>
+                        <div class="value">${report.dateLabel}</div>
+                    </div>
+                </div>
+                <table class="pt-report-table">
+                    <thead>
+                        <tr>
+                            <th>Analyte</th>
+                            <th>Reference Mean</th>
+                            <th>Our Laboratory</th>
+                            <th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                ${decisionButtons}
+                <p class="pt-note">Reference means are the target values from the proficiency program. By default, the PT report is considered a pass until the user marks the final result as pass or fail.</p>
+            `;
+        }
+
+        function markPtResult(instId, result) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+            ensurePtArchive(instData);
+            if (!instData.ptCurrent) {
+                instData.ptCurrent = createPtReport(instData);
+            }
+            instData.ptCurrent.status = result;
+            instData.ptCurrent.rows = instData.ptCurrent.rows.map(row => ({
+                ...row,
+                result
+            }));
+            instData.ptHistory.push({ ...instData.ptCurrent, archivedAt: Date.now() });
+            instData.ptCurrent = null;
+            instData.pt = result;
+            instData.ptDueDay = currentDay + 120;
+            populateRoster();
+            populateDevTools();
+            openPtModal(instId);
+        }
+
+        function openArchivedPt(instId, reportId) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+            ensurePtArchive(instData);
+            const report = (instData.ptHistory || []).find(entry => entry.id === reportId);
+            if (!report) return;
+            const archiveNav = buildPtArchiveNav(instData, reportId);
+            document.getElementById('pt-modal-content').innerHTML = `${archiveNav}${renderPtReportBody(instData, report, false)}`;
+            document.getElementById('pt-modal').style.display = 'flex';
+        }
+
+        function handlePtButtonClick(instId) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+            if (instData.verification !== 'Verified') {
+                openVerificationScreen(instId);
+                return;
+            }
+            openPtModal(instId);
+        }
+
+        function openPtModal(instId) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+            ensurePtArchive(instData);
+
+            const dueDay = instData.ptDueDay ?? (instData.verificationDate ? instData.verificationDate + 120 : currentDay + 120);
+            if (currentDay < dueDay) {
+                if (instData.ptHistory && instData.ptHistory.length) {
+                    const archiveNav = buildPtArchiveNav(instData, null);
+                    document.getElementById('pt-modal-content').innerHTML = `${archiveNav}<div class="pt-note">No new PT is currently available. Archived PT results are listed above.</div>`;
+                } else {
+                    document.getElementById('pt-modal-content').innerHTML = '<div class="pt-note">No PT is currently available. Archived PT results will appear here once completed.</div>';
+                }
+                document.getElementById('pt-modal').style.display = 'flex';
+                return;
+            }
+
+            if (!instData.ptCurrent) {
+                instData.ptCurrent = createPtReport(instData);
+            }
+            instData.ptCurrent.status = 'Pass';
+            instData.ptCurrent.rows = instData.ptCurrent.rows.map(row => ({ ...row, result: 'Pass' }));
+            document.getElementById('pt-modal-content').innerHTML = `${buildPtArchiveNav(instData, null)}${renderPtReportBody(instData, instData.ptCurrent, true)}`;
+            document.getElementById('pt-modal').style.display = 'flex';
+        }
+
+        function getInstrumentAnalytes(inst) {
+            const catalogData = instrumentCatalog.find(c => c.id === inst.catalogId);
+            if (catalogData && catalogData.id === 'hem_analyzer') {
+                return [
+                    { key: 'RBC', label: 'RBC', target: 5.1, sd: 0.18 },
+                    { key: 'WBC', label: 'WBC', target: 7.8, sd: 0.32 },
+                    { key: 'Platelets', label: 'Platelets', target: 250, sd: 10 },
+                    { key: 'Hemoglobin', label: 'Hemoglobin', target: 14.2, sd: 0.42 }
+                ];
+            }
+            return [{ key: 'QC', label: 'QC', target: 100, sd: 2.5 }];
+        }
+        function ensureQcHistory(inst) {
+            if (!inst.qcHistory) inst.qcHistory = {};
+            const analytes = getInstrumentAnalytes(inst);
+            analytes.forEach(analyte => {
+                if (!inst.qcHistory[analyte.key]) inst.qcHistory[analyte.key] = [];
+            });
+        }
+        const qcMonthLengths = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+        function getQcDateFromDay(dayNumber) {
+            let remaining = dayNumber;
+            let year = 2026;
+            let monthIndex = 0;
+            while (remaining > qcMonthLengths[monthIndex]) {
+                remaining -= qcMonthLengths[monthIndex];
+                monthIndex += 1;
+                if (monthIndex >= 12) {
+                    monthIndex = 0;
+                    year += 1;
+                }
+            }
+            return {
+                year,
+                monthIndex,
+                monthKey: `${year}-${String(monthIndex + 1).padStart(2, '0')}`,
+                dayOfMonth: remaining,
+                monthLabel: new Date(year, monthIndex, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+            };
+        }
+
+        function getCurrentQcMonthKey() {
+            return getQcDateFromDay(currentDay).monthKey;
+        }
+
+        function generateNormalQcValue(mean, sd) {
+            const u1 = Math.max(Number.MIN_VALUE, Math.random());
+            const u2 = Math.random();
+            const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+            return mean + (z0 * sd);
+        }
+
+        function addDailyQcPointForInstrument(inst) {
+            ensureQcHistory(inst);
+            const analytes = getInstrumentAnalytes(inst);
+            const qcDate = getQcDateFromDay(currentDay);
+            analytes.forEach(analyte => {
+                const series = inst.qcHistory[analyte.key];
+                const value = generateNormalQcValue(analyte.target, analyte.sd);
+                const boundedValue = Math.min(Math.max(value, analyte.target - (3 * analyte.sd)), analyte.target + (3 * analyte.sd));
+                series.push({
+                    day: qcDate.dayOfMonth,
+                    date: new Date(qcDate.year, qcDate.monthIndex, qcDate.dayOfMonth).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                    monthKey: qcDate.monthKey,
+                    value: Number(boundedValue.toFixed(analyte.key === 'Platelets' || analyte.key === 'Hemoglobin' ? 1 : 2))
+                });
+            });
+        }
+
+        function buildLeveyJenningsSVG(series, analyte) {
+            const values = series.map(p => p.value);
+            const minValue = Math.min(...values, analyte.target - (3 * analyte.sd));
+            const maxValue = Math.max(...values, analyte.target + (3 * analyte.sd));
+            const margin = { top: 20, right: 20, bottom: 40, left: 60 };
+            const width = 860;
+            const height = 300;
+            const graphWidth = width - margin.left - margin.right;
+            const graphHeight = height - margin.top - margin.bottom;
+            const xFor = (index) => margin.left + (series.length === 1 ? graphWidth / 2 : (index / Math.max(series.length - 1, 1)) * graphWidth);
+            const yFor = (value) => margin.top + graphHeight - (((value - minValue) / Math.max(maxValue - minValue, 1)) * graphHeight);
+            const meanY = yFor(analyte.target);
+            const formatValue = (v) => Number(v).toFixed(analyte.key === 'Platelets' || analyte.key === 'Hemoglobin' ? 1 : 2);
+            const controlLevels = [
+                { label: '-3 SD', value: analyte.target - (3 * analyte.sd), color: '#f87171', side: 'left' },
+                { label: '-2 SD', value: analyte.target - (2 * analyte.sd), color: '#fbbf24', side: 'left' },
+                { label: '-1 SD', value: analyte.target - (1 * analyte.sd), color: '#38bdf8', side: 'left' },
+                { label: 'Mean', value: analyte.target, color: '#f8fafc', side: 'right' },
+                { label: '+1 SD', value: analyte.target + (1 * analyte.sd), color: '#38bdf8', side: 'right' },
+                { label: '+2 SD', value: analyte.target + (2 * analyte.sd), color: '#fbbf24', side: 'right' },
+                { label: '+3 SD', value: analyte.target + (3 * analyte.sd), color: '#f87171', side: 'right' }
+            ];
+
+            const grid = Array.from({ length: 6 }, (_, i) => {
+                const y = margin.top + (i / 5) * graphHeight;
+                return `<line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="rgba(148,163,184,0.18)" />`;
+            }).join('');
+
+            const lines = controlLevels.map(level => {
+                const y = yFor(level.value);
+                const x = level.side === 'left' ? margin.left + 4 : width - margin.right - 4;
+                const anchor = level.side === 'left' ? 'start' : 'end';
+                const displayValue = formatValue(level.value);
+                return `
+                    <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="${level.color}" stroke-dasharray="4 4" stroke-width="1" />
+                    <text x="${x}" y="${y - 6}" fill="${level.color}" font-size="11" text-anchor="${anchor}">${level.label} (${displayValue})</text>
+                `;
+            }).join('');
+
+            const dataPoints = series.map((point, index) => {
+                const x = xFor(index);
+                const y = yFor(point.value);
+                return `
+                    <g>
+                        <circle cx="${x}" cy="${y}" r="4.5" fill="#4ade80" stroke="#f8fafc" stroke-width="1" />
+                        <text x="${x}" y="${height - 15}" text-anchor="middle" font-size="9" fill="#94a3b8">${point.day}</text>
+                    </g>
+                `;
+            }).join('');
+
+            return `
+                <svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+                    ${grid}
+                    ${lines}
+                    <line x1="${margin.left}" y1="${meanY}" x2="${width - margin.right}" y2="${meanY}" stroke="#f8fafc" stroke-width="1.2" stroke-dasharray="6 6" />
+                    <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" stroke="#e2e8f0" />
+                    <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" stroke="#e2e8f0" />
+                    ${dataPoints}
+                    <text x="${width / 2}" y="${height - 2}" text-anchor="middle" fill="#94a3b8" font-size="11">Day</text>
+                    <text x="18" y="${height / 2}" fill="#94a3b8" font-size="11" transform="rotate(-90 18 ${height / 2})" text-anchor="middle">Value</text>
+                </svg>
+            `;
+        }
+
+        function getQcMonthLabel(monthKey) {
+            if (!monthKey) return 'Current';
+            const [year, month] = monthKey.split('-').map(Number);
+            return new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        }
+
+        function getQcMonthKeys(instData) {
+            if (!instData || !instData.qcHistory) return [];
+            const keys = new Set();
+            Object.values(instData.qcHistory).forEach(series => {
+                (series || []).forEach(point => {
+                    if (point.monthKey) keys.add(point.monthKey);
+                });
+            });
+            const currentMonthKey = getCurrentQcMonthKey();
+            if (currentMonthKey) keys.add(currentMonthKey);
+            return Array.from(keys).sort();
+        }
+
+        function getSeriesForQcMonth(series, monthKey) {
+            if (!Array.isArray(series)) return [];
+            return series.filter(point => point.monthKey === monthKey);
+        }
+
+        function getQcMonthStatus(instData, monthKey) {
+            if (!instData || !instData.qcHistory) return 'In Control';
+            const analytes = getInstrumentAnalytes(instData);
+            for (const analyte of analytes) {
+                const series = getSeriesForQcMonth(instData.qcHistory[analyte.key] || [], monthKey);
+                for (const point of series) {
+                    if (point.value < analyte.target - (2 * analyte.sd) || point.value > analyte.target + (2 * analyte.sd)) {
+                        return 'Out of Control';
+                    }
+                }
+            }
+            return 'In Control';
+        }
+
+        function buildQcMonthNav(instData, activeMonthKey) {
+            const monthKeys = getQcMonthKeys(instData);
+            if (!monthKeys.length) return '';
+            const selectedMonth = activeMonthKey || monthKeys[monthKeys.length - 1];
+            const buttons = monthKeys.map(monthKey => {
+                const status = getQcMonthStatus(instData, monthKey);
+                const statusClass = status === 'Out of Control' ? 'out' : 'in';
+                return `
+                    <button class="qc-month-btn ${monthKey === selectedMonth ? 'active' : ''}" onclick="selectQcMonth('${instData.id}', '${monthKey}')">
+                        <span class="qc-month-name">${getQcMonthLabel(monthKey)}</span>
+                        <span class="qc-month-status ${statusClass}">${status}</span>
+                    </button>
+                `;
+            }).join('');
+            return `<div class="qc-month-tabs">${buttons}</div>`;
+        }
+
+        function buildQcAnalyteTabs(instData, monthKey, selectedKey) {
+            const analytes = getInstrumentAnalytes(instData);
+            const targetKey = selectedKey || analytes[0].key;
+            return `
+                <div class="qc-analyte-tabs">
+                    ${analytes.map(analyte => `
+                        <button class="qc-analyte-btn ${analyte.key === targetKey ? 'active' : ''}" onclick="selectQcAnalyte('${instData.id}', '${monthKey}', '${analyte.key}')">
+                            ${analyte.label}
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function buildPeerGroupComparison(analyte, series) {
+            const peerLabs = 200;
+            const observedMean = series.length ? calcMean(series.map(point => point.value)) : analyte.target;
+            const peerMean = analyte.target;
+            const peerSD = analyte.sd * 1.25;
+            const sdi = Number(Math.min(1.95, Math.max(-1.95, ((observedMean - peerMean) / peerSD) * 0.8)).toFixed(2));
+            const cv = Number(((peerSD / peerMean) * 100).toFixed(2));
+            const cvi = Number(Math.min(1.95, Math.max(-1.95, sdi * 0.8)).toFixed(2));
+
+            return {
+                labs: peerLabs,
+                mean: Number(peerMean.toFixed(analyte.key === 'Platelets' || analyte.key === 'Hemoglobin' ? 1 : 2)),
+                sd: Number(peerSD.toFixed(analyte.key === 'Platelets' || analyte.key === 'Hemoglobin' ? 1 : 2)),
+                sdi,
+                cv,
+                cvi
+            };
+        }
+
+        function renderQcMonthCards(instData, monthKey, selectedKey = null) {
+            const analytes = getInstrumentAnalytes(instData);
+            const activeKey = selectedKey || analytes[0].key;
+            const analyte = analytes.find(item => item.key === activeKey) || analytes[0];
+            const series = getSeriesForQcMonth(instData.qcHistory[analyte.key] || [], monthKey);
+            const logHtml = series.length ? series.map(point => `<li>${point.date}: ${point.value.toFixed(analyte.key === 'Platelets' || analyte.key === 'Hemoglobin' ? 1 : 2)}</li>`).join('') : '<li>No data for this month</li>';
+            const peer = buildPeerGroupComparison(analyte, series);
+            return `
+                <div class="qc-single-panel">
+                    ${buildQcAnalyteTabs(instData, monthKey, analyte.key)}
+                    <div class="qc-chart-card single-chart-card">
+                        <h3>${analyte.label}</h3>
+                        ${buildLeveyJenningsSVG(series, analyte)}
+                        <div class="qc-log"><strong>Daily log:</strong><ul>${logHtml}</ul></div>
+                        <div class="qc-peer-group">
+                            <h4>Peer Group Comparison</h4>
+                            <div class="qc-peer-grid">
+                                <div><span>Other Labs</span><strong>${peer.labs}</strong></div>
+                                <div><span>Mean</span><strong>${peer.mean}</strong></div>
+                                <div><span>SD</span><strong>${peer.sd}</strong></div>
+                                <div><span>SDI</span><strong>${peer.sdi}</strong></div>
+                                <div><span>CV</span><strong>${peer.cv}%</strong></div>
+                                <div><span>CVI</span><strong>${peer.cvi}</strong></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function selectQcMonth(instId, monthKey) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData || !monthKey) return;
+            ensureQcHistory(instData);
+            const selectedKey = getInstrumentAnalytes(instData)[0].key;
+            qcModalTitle.textContent = `${instData.name} - Levy-Jennings QC`;
+            const archiveNav = buildQcMonthNav(instData, monthKey);
+            const cards = renderQcMonthCards(instData, monthKey, selectedKey);
+            qcModalContent.innerHTML = `${archiveNav}<div class="qc-chart-container">${cards}</div>`;
+        }
+
+        function selectQcAnalyte(instId, monthKey, analyteKey) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData || !monthKey) return;
+            ensureQcHistory(instData);
+            qcModalTitle.textContent = `${instData.name} - Levy-Jennings QC`;
+            const archiveNav = buildQcMonthNav(instData, monthKey);
+            const cards = renderQcMonthCards(instData, monthKey, analyteKey);
+            qcModalContent.innerHTML = `${archiveNav}<div class="qc-chart-container">${cards}</div>`;
+        }
+
+        function openQcModal(instId) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+            if (!isInstrumentVerified(instData)) {
+                alert(`${instData.name} must be marked as verified before QC can run.`);
+                return;
+            }
+            ensureQcHistory(instData);
+            const monthKeys = getQcMonthKeys(instData);
+            const defaultMonth = monthKeys.includes(getCurrentQcMonthKey()) ? getCurrentQcMonthKey() : (monthKeys.length ? monthKeys[monthKeys.length - 1] : getCurrentQcMonthKey());
+            const defaultKey = getInstrumentAnalytes(instData)[0].key;
+            qcModalTitle.textContent = `${instData.name} - Levy-Jennings QC`;
+            qcModalContent.innerHTML = `${buildQcMonthNav(instData, defaultMonth)}<div class="qc-chart-container">${renderQcMonthCards(instData, defaultMonth, defaultKey)}</div>`;
+            qcModal.style.display = 'flex';
+        }
+        function populateDevTools() {
+            devToolsContainer.innerHTML = '';
+            if (ownedInstruments.length === 0) {
+                devToolsContainer.innerHTML = '<p class="devtools-note">No instruments are currently in the lab. Purchase one first.</p>';
+                return;
+            }
+
+            const table = document.createElement('table'); table.className = 'devtools-table';
+            table.innerHTML = `
+                <thead>
+                    <tr><th>Instrument</th><th>QC</th><th>PT</th><th>Verification</th></tr>
+                </thead>
+                <tbody></tbody>
+            `;
+
+            ownedInstruments.forEach(inst => {
+                const row = document.createElement('tr');
+                const ptState = getPtButtonState(inst);
+                const ptWarning = ptState.showWarning ? '<span class="pt-warning-mark">⚠</span>' : '';
+                row.innerHTML = `
+                    <td><strong>${inst.name}</strong></td>
+                    <td><button class="secondary" onclick="toggleInstrumentFlag('${inst.id}', 'qc')">${inst.qc === 'Verified' ? 'QC Verified' : 'QC Not Verified'}</button></td>
+                    <td><button class="status-badge ${ptState.actionClass} ${ptState.className}" onclick="handlePtButtonClick('${inst.id}')">${ptState.label}${ptWarning}</button></td>
+                    <td><button onclick="toggleInstrumentFlag('${inst.id}', 'verification')">${inst.verification === 'Verified' ? 'Verification Verified' : 'Verification Not Verified'}</button></td>
+                `;
+                table.querySelector('tbody').appendChild(row);
+            });
+
+            devToolsContainer.appendChild(table);
+        }
+        function isInstrumentVerified(inst) {
+            if (!inst) return false;
+            return inst.verification === 'Verified' || inst.verification === 'Complete' || inst.status === 'Online';
+        }
+
+        function quickApproveQC(instId) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+            instData.qc = 'Pass';
+            populateRoster();
+            populateDevTools();
+        }
+        function quickApprovePT(instId) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+            instData.pt = 'Pass';
+            populateRoster();
+            populateDevTools();
+        }
+        function quickVerifyInstrument(instId) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+
+            Object.keys(instData.studies).forEach(key => {
+                instData.studies[key] = 'Pass';
+            });
+
+            instData.verification = instData.verification === 'Verified' ? 'Not Verified' : 'Verified';
+            instData.status = instData.verification === 'Verified' ? 'Online' : 'Offline';
+            instData.verificationDate = instData.verification === 'Verified' ? currentDay : null;
+            instData.ptDueDay = instData.verification === 'Verified' ? currentDay + 120 : null;
+
+            if (verificationView.style.display === 'flex' && verifyingInstrumentId === instId) {
+                closeVerificationScreen();
+                studyRunnerView.style.display = 'none';
+            }
+
+            populateRoster();
+            populateDevTools();
+            if (studyRunnerView.style.display === 'flex' && verifyingInstrumentId === instId) {
+                studyRunnerView.style.display = 'none';
+            }
+            alert(`${instData.name} verification is now ${instData.verification}.`);
+        }
+        function toggleInstrumentFlag(instId, field) {
+            const instData = ownedInstruments.find(i => i.id === instId);
+            if (!instData) return;
+            const currentValue = instData[field] || 'Not Verified';
+            instData[field] = currentValue === 'Verified' ? 'Not Verified' : 'Verified';
+            if (field === 'verification') {
+                instData.status = instData.verification === 'Verified' ? 'Online' : 'Offline';
+                instData.verificationDate = instData.verification === 'Verified' ? currentDay : null;
+                instData.ptDueDay = instData.verification === 'Verified' ? currentDay + 120 : null;
+            }
+            populateRoster();
+            populateDevTools();
+        }
         function getBadgeClass(statusStr) { if (['pass', 'online', 'verified', 'complete'].includes(statusStr.toLowerCase())) return 'badge-pass'; if (['fail', 'not verified'].includes(statusStr.toLowerCase())) return 'badge-fail'; return 'badge-offline'; }
+        function getPtButtonState(inst) {
+            if (inst.verification !== 'Verified') {
+                return { label: 'None', className: 'badge-fail', actionClass: 'clickable', showWarning: false };
+            }
+            const dueDay = inst.ptDueDay ?? ((inst.verificationDate || currentDay) + 120);
+            if (currentDay >= dueDay) {
+                return { label: 'Available', className: 'badge-warning', actionClass: 'warning-action', showWarning: true };
+            }
+            return { label: 'None', className: 'badge-pass', actionClass: 'green-action', showWarning: false };
+        }
         function populateRoster() {
             rosterBody.innerHTML = '';
             if (ownedInstruments.length === 0) { rosterBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No instruments currently in lab.</td></tr>`; return; }
             ownedInstruments.forEach(inst => {
-                const tr = document.createElement('tr'); let verifHTML = `<span class="status-badge ${getBadgeClass(inst.verification)}">${inst.verification}</span>`;
-                if (inst.verification === 'Not Verified') { verifHTML = `<button class="status-badge clickable ${getBadgeClass(inst.verification)}" onclick="openVerificationScreen('${inst.id}')">${inst.verification}</button>`; }
-                tr.innerHTML = `<td><strong>${inst.name}</strong></td><td><span class="status-badge ${getBadgeClass(inst.status)}">${inst.status}</span></td><td><span class="status-badge ${getBadgeClass(inst.qc)}">${inst.qc}</span></td><td><span class="status-badge ${getBadgeClass(inst.pt)}">${inst.pt}</span></td><td>${verifHTML}</td>`;
+                const tr = document.createElement('tr');
+                const verificationIsActive = inst.verification === 'Verified';
+                const verificationClass = verificationIsActive ? 'clickable green-action badge-pass' : `clickable ${getBadgeClass(inst.verification)}`;
+                let verifHTML = `<button class="status-badge ${verificationClass}" onclick="openVerificationScreen('${inst.id}')">${inst.verification}</button>`;
+                if (inst.verification === 'Not Verified') {
+                    verifHTML = `<button class="status-badge clickable ${getBadgeClass(inst.verification)}" onclick="openVerificationScreen('${inst.id}')">${inst.verification}</button>`;
+                }
+                const qcIsActive = inst.verification === 'Verified';
+                const qcLabel = qcIsActive ? 'Active' : (inst.qc === 'Verified' ? 'QC Verified' : 'QC Not Verified');
+                const qcClass = qcIsActive ? 'badge-pass' : getBadgeClass(inst.qc);
+                const qcActionClass = qcIsActive ? 'clickable green-action' : 'clickable';
+                const qcCell = `<button class="status-badge ${qcActionClass} ${qcClass}" onclick="openQcModal('${inst.id}')">${qcLabel}</button>`;
+                const ptState = getPtButtonState(inst);
+                const ptWarning = ptState.showWarning ? '<span class="pt-warning-mark">⚠</span>' : '';
+                const ptCell = `<button class="status-badge clickable ${ptState.actionClass} ${ptState.className}" onclick="handlePtButtonClick('${inst.id}')">${ptState.label}${ptWarning}</button>`;
+                tr.innerHTML = `<td><strong>${inst.name}</strong></td><td><span class="status-badge ${getBadgeClass(inst.status)}">${inst.status}</span></td><td>${qcCell}</td><td>${ptCell}</td><td>${verifHTML}</td>`;
                 rosterBody.appendChild(tr);
             });
         }
@@ -472,6 +1476,27 @@
             if (allPassed) { instData.verification = 'Complete'; instData.status = 'Online'; alert(`${instData.name} has passed all verification studies and is now ONLINE.`); }
             studyRunnerView.style.display = 'none';
             if (allPassed) { verifyingInstrumentId = null; } else { renderStudyButtons(instData); verificationView.style.display = 'flex'; }
+            populateRoster();
+            populateDevTools();
+        }
+        function updateQCDataOnDayAdvance() {
+            ownedInstruments.forEach(inst => {
+                if (!isInstrumentVerified(inst)) return;
+                ensureQcHistory(inst);
+                const qcDate = getQcDateFromDay(currentDay);
+                const analytes = getInstrumentAnalytes(inst);
+                analytes.forEach(analyte => {
+                    const series = inst.qcHistory[analyte.key];
+                    const variation = (Math.random() - 0.5) * analyte.sd * 1.2;
+                    const value = Math.min(Math.max(analyte.target + variation, analyte.target - (2 * analyte.sd)), analyte.target + (2 * analyte.sd));
+                    series.push({
+                        day: qcDate.dayOfMonth,
+                        date: new Date(qcDate.year, qcDate.monthIndex, qcDate.dayOfMonth).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                        monthKey: qcDate.monthKey,
+                        value: Number(value.toFixed(analyte.key === 'Platelets' || analyte.key === 'Hemoglobin' ? 1 : 2))
+                    });
+                });
+            });
         }
         initGame();
     

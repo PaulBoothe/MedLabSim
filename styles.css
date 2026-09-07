@@ -25,6 +25,16 @@
         /* --- MAIN VIEWPORT & SPRITES --- */
         .main-viewport { grid-area: main; background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%); position: relative; overflow: hidden; }
         .floor-title { position: absolute; top: 20px; left: 30px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase; opacity: 0.5; margin: 0; z-index: 0; }
+        .certificate-frame { width: 190px; min-height: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 12px; color: var(--text-muted); background: rgba(15, 23, 42, 0.82); border: 2px dashed var(--border-color); border-radius: 4px; cursor: pointer; z-index: 20; transition: all 0.2s ease; }
+        .certificate-frame:hover { border-color: var(--accent-color); color: var(--text-main); transform: translateY(-2px); box-shadow: 0 0 18px rgba(56, 189, 248, 0.2); }
+        .certificate-frame.registered { border-style: solid; border-color: var(--warning-color); color: var(--warning-color); }
+        .certificate-frame.gold { border-color: #facc15; background: linear-gradient(145deg, rgba(120, 80, 0, 0.28), rgba(15, 23, 42, 0.9)); box-shadow: 0 0 18px rgba(250, 204, 21, 0.22); }
+        .certificate-seal { border: 1px solid currentColor; border-radius: 50%; padding: 6px 4px; font-size: 0.62rem; font-weight: bold; letter-spacing: 0.08em; }
+        #certificate-title { font-size: 0.78rem; font-weight: bold; text-transform: uppercase; text-align: center; }
+        #certificate-countdown { font-size: 0.7rem; text-align: center; }
+        .compliance-modal-header { align-items: flex-start; }
+        .compliance-certificate-frame { margin-left: auto; margin-right: 18px; min-height: 82px; width: 170px; padding: 8px; }
+        .compliance-certificate-frame #certificate-title { font-size: 0.7rem; }
         .instrument-sprite {
             position: absolute; border-radius: 4px; border: 2px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 10px rgba(0,0,0,0.5);
             display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; transform: translate(-50%, -50%); z-index: 10; transition: border-color 0.2s;
@@ -81,10 +91,19 @@
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--modal-overlay); z-index: 100; justify-content: center; align-items: center; }
         .modal-content { background-color: var(--panel-bg); border: 2px solid var(--border-color); border-radius: 8px; width: 600px; max-width: 90%; padding: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); max-height: 80vh; overflow-y: auto; }
         .modal-content.wide-modal { width: 800px; }
+        .advance-days-modal-content { width: 420px; max-width: 90vw; }
+        .advance-days-label { display: block; color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; margin: 18px 0 8px; }
+        .advance-days-input { width: 100%; box-sizing: border-box; background-color: rgba(15, 23, 42, 0.9); color: var(--text-main); border: 1px solid var(--accent-color); border-radius: 5px; padding: 12px; font-size: 1.2rem; font-family: 'Courier New', Courier, monospace; }
+        .advance-days-input:focus { outline: 2px solid rgba(56, 189, 248, 0.35); }
+        .advance-days-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
         .modal-header h2 { margin: 0; color: var(--accent-color); text-transform: uppercase; }
         .close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; } .close-btn:hover { color: var(--text-main); }
         .catalog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .shop-segment-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
+        .shop-segment-btn { flex: 1; background-color: rgba(15, 23, 42, 0.8); color: var(--text-muted); border: 1px solid var(--border-color); padding: 11px 16px; border-radius: 5px; cursor: pointer; font-weight: bold; text-transform: uppercase; letter-spacing: 0.04em; transition: all 0.2s ease; }
+        .shop-segment-btn:hover { color: var(--text-main); border-color: var(--accent-color); }
+        .shop-segment-btn.active { background-color: var(--accent-color); color: #0f172a; border-color: var(--accent-color); }
         .catalog-item { background-color: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 6px; padding: 15px; display: flex; flex-direction: column; justify-content: space-between; }
         .item-price { color: var(--positive-color); font-family: 'Courier New', Courier, monospace; margin-bottom: 15px; }
         .buy-btn { background-color: var(--text-main); color: var(--bg-color); border: none; padding: 8px; border-radius: 4px; font-weight: bold; cursor: pointer; text-transform: uppercase; }
@@ -101,6 +120,29 @@
         .devtools-table td button.warning { background-color: var(--warning-color); color: #0f172a; }
         .devtools-table td button:hover { filter: brightness(1.1); }
         .devtools-table td button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .compliance-modal-content { max-width: 900px; }
+        .compliance-section { background-color: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 14px; }
+        .compliance-section h3 { margin: 0 0 12px; color: var(--accent-color); text-transform: uppercase; font-size: 0.95rem; letter-spacing: 0.06em; }
+        .compliance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+        .compliance-choice { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; background-color: rgba(15, 23, 42, 0.8); }
+        .compliance-choice:has(input:checked) { border-color: var(--accent-color); background-color: rgba(56, 189, 248, 0.1); }
+        .compliance-choice input { accent-color: var(--accent-color); }
+        .compliance-choice strong { color: var(--text-main); }
+        .compliance-choice span { color: var(--text-muted); font-size: 0.82rem; line-height: 1.35; }
+        .compliance-status { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .compliance-status strong { color: var(--warning-color); font-size: 1.2rem; }
+        .compliance-checklist { display: grid; gap: 10px; }
+        .compliance-check { display: flex; align-items: center; gap: 10px; padding: 10px; background-color: rgba(15, 23, 42, 0.8); border-radius: 5px; }
+        .compliance-check input { width: 18px; height: 18px; accent-color: var(--positive-color); }
+        .compliance-check.complete { color: var(--positive-color); }
+        .compliance-action { background-color: var(--accent-color); color: #0f172a; border: none; padding: 11px 16px; border-radius: 5px; font-weight: bold; cursor: pointer; text-transform: uppercase; }
+        .compliance-action:disabled { opacity: 0.45; cursor: not-allowed; }
+        .compliance-action.danger { background-color: var(--negative-color); }
+        .certification-option { text-align: left; min-height: 100px; }
+        .certification-option strong { font-size: 1rem; }
+        .compliance-finding { display: flex; justify-content: space-between; gap: 12px; align-items: center; border-left: 4px solid var(--negative-color); background-color: rgba(248, 113, 113, 0.08); padding: 12px; margin-bottom: 10px; }
+        .compliance-finding p { margin: 0; color: var(--text-main); line-height: 1.4; }
+        .compliance-fine { color: var(--warning-color); font-size: 0.8rem; }
 
         /* QC Plot */
         .qc-month-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border-color); }

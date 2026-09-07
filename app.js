@@ -2,6 +2,20 @@
         /** --- GAME STATE & CONFIG --- */
         const gameConfig = { startingBudget: 250000, dailyOperatingCost: 2000, revenuePerTest: 15, baseDailyVolume: 300 };
         let currentDay = 1; let currentBudget = gameConfig.startingBudget;
+        const complianceState = {
+            certificate: null,
+            certificationPath: null,
+            complexity: null,
+            agency: null,
+            inspectionTimer: 90,
+            pocTimer: null,
+            deficiencies: [],
+            ptEnrollment: false,
+            directorLogsSigned: false,
+            staffQualified: true,
+            testingDisabled: false,
+            permanentActions: []
+        };
 
         const instrumentCatalog = [
             { 
@@ -25,7 +39,7 @@
             { id: 'spun_hct', name: 'Spun Hematocrit', price: 1500, color: '#f59e0b', w: 40, h: 40, abv: 'SH', icon: `<svg viewBox="0 0 64 64" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg"><rect x="8" y="8" width="48" height="48" rx="4" fill="#f59e0b" stroke="#38bdf8" stroke-width="2"/><circle cx="32" cy="28" r="10" fill="#fb923c" stroke="#0f172a" stroke-width="1"/><rect x="30" y="18" width="4" height="8" rx="1" fill="#0f172a" transform="rotate(25 32 22)"/><rect x="26" y="40" width="12" height="8" rx="2" fill="#334155"/><rect x="30" y="34" width="4" height="6" rx="1" fill="#ffffff" opacity="0.9"/></svg>` }
         ];
 
-        let ownedInstruments = []; let instrumentIdCounter = 0; let activeInstrument = null; let ghostElement = null; let isArrangeMode = false; let movingInstrumentId = null; 
+        let ownedInstruments = []; let instrumentIdCounter = 0; let activeInstrument = null; let ghostElement = null; let isArrangeMode = false; let movingInstrumentId = null; let activeShopSegment = 'instruments';
         let verifyingInstrumentId = null; let activeStudyKey = null; let precisionRunCounter = 0;
 
         const studyDefs = {
@@ -39,8 +53,11 @@
 
         const dayDisplay = document.getElementById('day-display'); const budgetDisplay = document.getElementById('budget-display'); const netDisplay = document.getElementById('net-display');
         const shopModal = document.getElementById('shop-modal'); const catalogContainer = document.getElementById('catalog-container');
+        const advanceDaysModal = document.getElementById('advance-days-modal'); const advanceDaysInput = document.getElementById('advance-days-input');
         const rosterModal = document.getElementById('roster-modal'); const rosterBody = document.getElementById('roster-body');
         const devToolsModal = document.getElementById('devtools-modal'); const devToolsContainer = document.getElementById('devtools-container');
+        const complianceModal = document.getElementById('compliance-modal'); const complianceContent = document.getElementById('compliance-content');
+        const certificateFrame = document.getElementById('certificate-frame'); const certificateTitle = document.getElementById('certificate-title'); const certificateCountdown = document.getElementById('certificate-countdown');
         const qcModal = document.getElementById('qc-modal'); const qcModalContent = document.getElementById('qc-modal-content'); const qcModalTitle = document.getElementById('qc-modal-title');
         const labFloor = document.getElementById('lab-floor'); const arrangeBtn = document.getElementById('arrange-btn');
         const verificationView = document.getElementById('verification-view'); const verifSprite = document.getElementById('verif-sprite'); const verifName = document.getElementById('verif-name'); const studyButtonsContainer = document.getElementById('study-buttons-container');
@@ -48,22 +65,77 @@
 
         /** --- CORE LOOP & UI --- */
         function initGame() { updateUI(); }
-        function advanceShift() { currentDay++; let dailyRevenue = gameConfig.baseDailyVolume * gameConfig.revenuePerTest; currentBudget += dailyRevenue; currentBudget -= gameConfig.dailyOperatingCost; updateQCDataOnDayAdvance(); updateUI(); }
+        function advanceShift() {
+            currentDay++;
+            const revenueBonus = complianceState.agency === 'CAP' ? 1.1 : 1;
+            const dailyRevenue = complianceState.testingDisabled ? 0 : gameConfig.baseDailyVolume * gameConfig.revenuePerTest * revenueBonus;
+            const payroll = complianceState.complexity === 'high' ? 3500 : gameConfig.dailyOperatingCost;
+            currentBudget += dailyRevenue - payroll;
+            if (complianceState.certificate && complianceState.pocTimer !== null) {
+                complianceState.pocTimer--;
+                if (complianceState.pocTimer <= 0 && complianceState.deficiencies.length) {
+                    complianceState.testingDisabled = true;
+                    complianceState.pocTimer = 0;
+                }
+            } else if (complianceState.certificate && complianceState.certificate.grade !== 'gold') {
+                complianceState.inspectionTimer--;
+                if (complianceState.inspectionTimer <= 0) runInspection();
+            }
+            updateQCDataOnDayAdvance(); updateUI();
+        }
+        function advanceMultipleDays() {
+            advanceDaysInput.value = '7';
+            advanceDaysModal.style.display = 'flex';
+            setTimeout(() => { advanceDaysInput.focus(); advanceDaysInput.select(); }, 0);
+        }
+        function closeAdvanceDaysModal() {
+            advanceDaysModal.style.display = 'none';
+        }
+        function confirmAdvanceMultipleDays() {
+            const requestedDays = Number.parseInt(advanceDaysInput.value, 10);
+            if (!Number.isInteger(requestedDays) || requestedDays < 1) return;
+            const daysToAdvance = Math.min(requestedDays, 3650);
+            closeAdvanceDaysModal();
+            for (let day = 0; day < daysToAdvance; day++) advanceShift();
+        }
         function updateUI() {
             dayDisplay.textContent = currentDay; budgetDisplay.textContent = "$" + currentBudget.toLocaleString();
-            let dailyNet = (gameConfig.baseDailyVolume * gameConfig.revenuePerTest) - gameConfig.dailyOperatingCost;
+            const revenueBonus = complianceState.agency === 'CAP' ? 1.1 : 1;
+            let dailyNet = (complianceState.testingDisabled ? 0 : gameConfig.baseDailyVolume * gameConfig.revenuePerTest * revenueBonus) - (complianceState.complexity === 'high' ? 3500 : gameConfig.dailyOperatingCost);
             if (dailyNet >= 0) { netDisplay.textContent = "+$" + dailyNet.toLocaleString() + " / day"; netDisplay.className = "net-indicator net-positive"; budgetDisplay.style.color = "var(--positive-color)"; } 
             else { netDisplay.textContent = "-$" + Math.abs(dailyNet).toLocaleString() + " / day"; netDisplay.className = "net-indicator net-negative"; budgetDisplay.style.color = "var(--negative-color)"; }
-            if (shopModal.style.display === "flex") { populateShop(); }
+            if (shopModal.style.display === "flex") { renderShopSegment(); }
+            updateCertificateFrame();
         }
 
         /** --- SHOP / PLACEMENT --- */
-        function openShop() { if (activeInstrument) return; if (isArrangeMode) toggleArrangeMode(); populateShop(); shopModal.style.display = 'flex'; }
+        function openShop() { if (activeInstrument) return; if (isArrangeMode) toggleArrangeMode(); activeShopSegment = 'instruments'; renderShopSegment(); shopModal.style.display = 'flex'; }
         function closeShop() { shopModal.style.display = 'none'; }
+        function openShopSegment(segment) {
+            activeShopSegment = segment;
+            renderShopSegment();
+        }
+        function renderShopSegment() {
+            document.getElementById('shop-instruments-tab').classList.toggle('active', activeShopSegment === 'instruments');
+            document.getElementById('shop-compliance-tab').classList.toggle('active', activeShopSegment === 'compliance');
+            if (activeShopSegment === 'compliance') populateComplianceShop();
+            else populateShop();
+        }
+        function populateComplianceShop() {
+            catalogContainer.innerHTML = '';
+            const card = document.createElement('div'); card.className = 'catalog-item';
+            if (complianceState.ptEnrollment) {
+                card.innerHTML = `<div><div class="item-name">PT Enrollment</div><div class="item-price">Enrolled</div><p class="devtools-note">The laboratory is enrolled in an external proficiency testing program.</p></div><button class="buy-btn" disabled>Enrolled</button>`;
+            } else {
+                card.innerHTML = `<div><div class="item-name">PT Enrollment</div><div class="item-price">$2,500 annual enrollment</div><p class="devtools-note">Enroll the laboratory in an external proficiency testing program.</p></div><button class="buy-btn" ${currentBudget < 2500 ? 'disabled' : ''} onclick="purchasePtEnrollment()">${currentBudget >= 2500 ? 'Purchase' : 'Insufficient Funds'}</button>`;
+            }
+            catalogContainer.appendChild(card);
+        }
         function populateShop() {
             catalogContainer.innerHTML = ''; 
             instrumentCatalog.forEach((inst, index) => {
-                const canAfford = currentBudget >= inst.price; const card = document.createElement('div'); card.className = 'catalog-item';
+                const complexityLocked = complianceState.complexity === 'waived' && inst.id !== 'spun_hct';
+                const canAfford = currentBudget >= inst.price && !complexityLocked; const card = document.createElement('div'); card.className = 'catalog-item';
                 card.innerHTML = `
                     <div style="display:flex; gap:12px; align-items:center;">
                         <div style="width:48px; height:48px; display:flex; align-items:center; justify-content:center; border-radius:6px; overflow:hidden;">
@@ -74,12 +146,17 @@
                             <div class="item-price">$${inst.price.toLocaleString()}</div>
                         </div>
                     </div>
-                    <button class="buy-btn" ${!canAfford ? 'disabled' : ''} onclick="buyInstrument(${index})">${canAfford ? 'Purchase' : 'Insufficient Funds'}</button>`;
+                    <button class="buy-btn" ${!canAfford ? 'disabled' : ''} onclick="buyInstrument(${index})">${complexityLocked ? 'High Complexity Required' : canAfford ? 'Purchase' : 'Insufficient Funds'}</button>`;
                 catalogContainer.appendChild(card);
             });
         }
+        function purchasePtEnrollment() {
+            if (complianceState.ptEnrollment || currentBudget < 2500) return;
+            currentBudget -= 2500; complianceState.ptEnrollment = true; updateUI(); renderShopSegment(); renderComplianceModal();
+        }
         function buyInstrument(index) {
             const inst = instrumentCatalog[index];
+            if (complianceState.complexity === 'waived' && inst.id !== 'spun_hct') { alert('Waived complexity laboratories cannot purchase this analyzer.'); return; }
             if (currentBudget >= inst.price) { currentBudget -= inst.price; updateUI(); closeShop(); startPlacementMode(inst, null); }
         }
         function startPlacementMode(catalogData, existingId) {
@@ -110,6 +187,143 @@
             const instData = ownedInstruments.find(i => i.id === domId); const catalogData = instrumentCatalog.find(c => c.id === instData.catalogId);
             document.getElementById(domId).style.display = 'none'; startPlacementMode(catalogData, domId);
             if (ghostElement) { ghostElement.style.left = e.clientX + 'px'; ghostElement.style.top = e.clientY + 'px'; }
+        }
+
+        function openComplianceModal() { if (activeInstrument) return; renderComplianceModal(); complianceModal.style.display = 'flex'; }
+        function closeComplianceModal() { complianceModal.style.display = 'none'; }
+        function updateCertificateFrame() {
+            if (!certificateFrame) return;
+            const hasCertificate = Boolean(complianceState.certificate);
+            certificateFrame.classList.toggle('registered', hasCertificate && complianceState.certificate.grade !== 'gold');
+            certificateFrame.classList.toggle('gold', hasCertificate && complianceState.certificate.grade === 'gold');
+            certificateTitle.textContent = hasCertificate ? complianceState.certificate.title : 'No Certificate';
+            if (!hasCertificate) { certificateTitle.textContent = 'Apply for certification'; certificateCountdown.textContent = 'No certificate issued'; }
+            else if (complianceState.pocTimer !== null) certificateCountdown.textContent = `POC: ${complianceState.pocTimer} days remaining`;
+            else if (complianceState.certificate.grade === 'gold') certificateCountdown.textContent = `Inspection in ${complianceState.inspectionTimer} days`;
+            else certificateCountdown.textContent = `Inspection in ${complianceState.inspectionTimer} days`;
+        }
+        function allInstrumentsVerified() {
+            return ownedInstruments.length > 0 && ownedInstruments.every(inst => Object.values(inst.studies || {}).every(status => status === 'Pass') && isInstrumentVerified(inst));
+        }
+        function toggleComplianceRequirement(key) {
+            complianceState[key] = !complianceState[key];
+            renderComplianceModal(); updateUI();
+        }
+        function selectCertification(path) {
+            complianceState.certificationPath = path;
+            if (path === 'cms') complianceState.agency = 'CMS';
+            if (path === 'cap') complianceState.agency = 'CAP';
+            renderComplianceModal();
+        }
+        function resetCertificationChoice() {
+            complianceState.certificationPath = null;
+            complianceState.agency = null;
+            renderComplianceModal();
+        }
+        function submitRegistration() {
+            const complexity = document.querySelector('input[name="lab-complexity"]:checked')?.value;
+            const agency = document.querySelector('input[name="inspecting-agency"]:checked')?.value || complianceState.agency;
+            if (!complexity || !agency) { alert('Select a laboratory complexity and inspecting agency before submitting.'); return; }
+            if (currentBudget < 1500) { alert('The $1,500 application fee cannot be paid.'); return; }
+            currentBudget -= 1500;
+            complianceState.complexity = complexity; complianceState.agency = agency;
+            complianceState.certificate = { title: 'Certificate of Registration', grade: 'registration', issuedDay: currentDay };
+            renderComplianceModal(); updateUI();
+        }
+        function getInspectionDeficiencies() {
+            const findings = [];
+            if (complianceState.complexity === 'high' && !complianceState.staffQualified) {
+                findings.push({ id: 'staff', text: 'High Complexity laboratory is using under-qualified staff.', fine: 10000, action: 'Staff training completed and competency records added.' });
+            }
+            if (!allInstrumentsVerified()) {
+                findings.push({ id: 'checklist-verification', text: 'The pre-inspection checklist is incomplete: instrument verification records are not 100% complete.', fine: 10000, action: 'All instruments must complete their verification studies before release.' });
+            }
+            if (!complianceState.directorLogsSigned) {
+                findings.push({ id: 'director-logs', text: 'Director logs have not been signed before inspection.', fine: 5000, action: 'Director log sign-off is required at every inspection.' });
+            }
+            ownedInstruments.forEach(inst => {
+                const studiesComplete = Object.values(inst.studies || {}).every(status => status === 'Pass');
+                if (inst.status === 'Online' && !studiesComplete) {
+                    findings.push({ id: `verification-${inst.id}`, text: `${inst.name} was placed Online before all verification studies were completed.`, fine: 15000, action: `${inst.name} release workflow requires completed verification.` });
+                }
+            });
+            ownedInstruments.forEach(inst => {
+                if (getQcMonthStatus(inst, getCurrentQcMonthKey()) === 'Out of Control' && inst.qc !== 'Verified' && inst.qc !== 'Pass') {
+                    findings.push({ id: `qc-${inst.id}`, text: `${inst.name} has an out-of-control QC period without documented corrective action.`, fine: 7500, action: 'QC review and corrective-action documentation required.' });
+                }
+            });
+            if (!complianceState.ptEnrollment) findings.push({ id: 'pt', text: 'The laboratory has no PT enrollment on file.', fine: 7500, action: 'Annual proficiency testing enrollment is now required.' });
+            return findings;
+        }
+        function runInspection() {
+            if (!complianceState.certificate || complianceState.certificate.grade === 'gold') return;
+            complianceState.deficiencies = getInspectionDeficiencies();
+            if (!complianceState.deficiencies.length) {
+                awardGoldCertificate();
+                alert('The Inspector has arrived. The laboratory passed inspection with no deficiencies.');
+            } else {
+                complianceState.pocTimer = 30;
+                alert(`The Inspector has arrived. ${complianceState.deficiencies.length} deficiency(ies) require a Plan of Correction.`);
+            }
+            renderComplianceModal(); updateUI();
+        }
+        function awardGoldCertificate() {
+            complianceState.certificate = { ...complianceState.certificate, title: complianceState.agency === 'CAP' ? 'Certificate of Accreditation' : 'Certificate of Compliance', grade: 'gold' };
+            complianceState.inspectionTimer = 730; complianceState.pocTimer = null; complianceState.deficiencies = []; complianceState.testingDisabled = false;
+        }
+        function resolveDeficiency(deficiencyId) {
+            const deficiency = complianceState.deficiencies.find(item => item.id === deficiencyId);
+            if (!deficiency || currentBudget < deficiency.fine) { alert('Insufficient funds for this corrective action.'); return; }
+            currentBudget -= deficiency.fine;
+            complianceState.permanentActions.push(deficiency.action);
+            complianceState.deficiencies = complianceState.deficiencies.filter(item => item.id !== deficiencyId);
+            if (!complianceState.deficiencies.length) awardGoldCertificate();
+            renderComplianceModal(); updateUI();
+        }
+        function renderComplianceModal() {
+            if (!complianceContent) return;
+            if (!complianceState.certificate) {
+                if (!complianceState.certificationPath) {
+                    complianceContent.innerHTML = `
+                        <div class="compliance-section"><h3>Apply for certification</h3><p class="devtools-note">Choose the certification path for this laboratory.</p>
+                            <div class="compliance-grid">
+                                <button class="compliance-choice certification-option" onclick="selectCertification('registration')"><strong>Certificate of Registration</strong><span>Begin the CMS-116 registration process and start the 90-day inspection clock.</span></button>
+                                <button class="compliance-choice certification-option" onclick="selectCertification('cms')"><strong>Certificate of Compliance via CMS</strong><span>Apply through CMS for the standard certificate of compliance.</span></button>
+                                <button class="compliance-choice certification-option" onclick="selectCertification('cap')"><strong>Certificate of Accreditation via CAP</strong><span>Apply through CAP for accreditation and a revenue bonus.</span></button>
+                            </div>
+                        </div>`;
+                    updateCertificateFrame();
+                    return;
+                }
+                complianceContent.innerHTML = `
+                    <div class="compliance-section"><h3>${complianceState.certificationPath === 'registration' ? 'CMS-116 Registration Form' : complianceState.certificationPath === 'cms' ? 'CMS Certificate of Compliance Application' : 'CAP Certificate of Accreditation Application'}</h3><p class="devtools-note">Application fee: $1,500. Select laboratory complexity before submitting.</p>
+                        <div class="compliance-grid">
+                            <label class="compliance-choice"><input type="radio" name="lab-complexity" value="waived"><strong>Waived</strong><span>Lowest cost. Heavy analyzers remain locked.</span></label>
+                            <label class="compliance-choice"><input type="radio" name="lab-complexity" value="moderate"><strong>Moderate</strong><span>Standard complexity and operating costs.</span></label>
+                            <label class="compliance-choice"><input type="radio" name="lab-complexity" value="high"><strong>High</strong><span>Higher payroll. Unlocks the full analyzer catalog.</span></label>
+                        </div>
+                    </div>
+                    <div class="compliance-section"><h3>Inspecting Agency</h3><div class="compliance-grid">
+                        <label class="compliance-choice"><input type="radio" name="inspecting-agency" value="CMS" ${complianceState.agency === 'CMS' ? 'checked' : ''}><strong>CMS</strong><span>Standard Certificate of Compliance.</span></label>
+                        <label class="compliance-choice"><input type="radio" name="inspecting-agency" value="CAP" ${complianceState.agency === 'CAP' ? 'checked' : ''}><strong>CAP</strong><span>Premium accreditation with a revenue bonus.</span></label>
+                    </div></div>
+                    ${complianceState.certificationPath === 'registration' ? '<div class="compliance-section"><h3>Registration Readiness Checklist</h3><div class="compliance-checklist"><div class="compliance-check"><span>1. Purchase PT Enrollment from the shop</span></div><div class="compliance-check"><span>2. Complete instrument verifications</span></div><div class="compliance-check"><span>3. Sign director logs</span></div></div></div>' : ''}
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;"><button class="compliance-action" onclick="submitRegistration()">Submit Application and Pay $1,500</button><button class="quiz-back-btn" onclick="resetCertificationChoice()">Back to Certification Options</button></div>`;
+                return;
+            }
+            const verified = allInstrumentsVerified();
+            const checklist = [
+                { key: 'ptEnrollment', label: 'Purchase PT Enrollment from the shop', complete: complianceState.ptEnrollment },
+                { key: 'verified', label: 'Complete instrument verifications', complete: verified },
+                { key: 'directorLogsSigned', label: 'Sign director logs', complete: complianceState.directorLogsSigned },
+                { key: 'staffQualified', label: 'Confirm staff competency for the selected complexity', complete: complianceState.staffQualified }
+            ];
+            const findings = complianceState.deficiencies.length ? `<div class="compliance-section"><h3>Plan of Correction <strong>${complianceState.pocTimer} days</strong></h3>${complianceState.deficiencies.map(item => `<div class="compliance-finding"><div><p>${item.text}</p><span class="compliance-fine">Corrective action fine: $${item.fine.toLocaleString()} | Preventive action: ${item.action}</span></div><button class="compliance-action danger" onclick="resolveDeficiency('${item.id}')">Resolve</button></div>`).join('')}</div>` : '';
+            complianceContent.innerHTML = `
+                <div class="compliance-section"><div class="compliance-status"><div><h3>Certificate Status</h3><strong>${complianceState.certificate.title}</strong><p class="devtools-note">${complianceState.agency} | ${complianceState.complexity} complexity</p></div><div><strong>${complianceState.pocTimer !== null ? `${complianceState.pocTimer} days` : `${complianceState.inspectionTimer} days`}</strong><p class="devtools-note">${complianceState.pocTimer !== null ? 'POC timer' : 'until inspection'}</p></div></div></div>
+                <div class="compliance-section"><h3>Pre-Inspection Checklist</h3><div class="compliance-checklist">${checklist.map(item => `<label class="compliance-check ${item.complete ? 'complete' : ''}"><input type="checkbox" ${item.complete ? 'checked' : ''} ${item.key === 'verified' ? 'disabled' : `onchange="toggleComplianceRequirement('${item.key}')"`}><span>${item.complete ? 'Complete: ' : 'Pending: '}${item.label}</span>${item.key === 'ptEnrollment' && !item.complete ? '<button type="button" class="compliance-action" onclick="closeComplianceModal(); openShop()">Open Shop</button>' : ''}</label>`).join('')}</div></div>
+                ${findings}
+                <div class="compliance-section"><h3>Audit Record</h3><p class="devtools-note">Permanent preventive actions: ${complianceState.permanentActions.length ? complianceState.permanentActions.join(' | ') : 'None recorded'}</p><p class="devtools-note">Patient testing: ${complianceState.testingDisabled ? 'DISABLED until compliance is restored' : 'Enabled'}</p></div>`;
         }
 
         /** --- ROSTER & VERIFICATION SCREEN --- */
@@ -1086,6 +1300,11 @@
             const currentValue = instData[field] || 'Not Verified';
             instData[field] = currentValue === 'Verified' ? 'Not Verified' : 'Verified';
             if (field === 'verification') {
+                if (instData.verification === 'Verified') {
+                    Object.keys(instData.studies || {}).forEach(key => {
+                        instData.studies[key] = 'Pass';
+                    });
+                }
                 instData.status = instData.verification === 'Verified' ? 'Online' : 'Offline';
                 instData.verificationDate = instData.verification === 'Verified' ? currentDay : null;
                 instData.ptDueDay = instData.verification === 'Verified' ? currentDay + 120 : null;
